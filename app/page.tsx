@@ -1,8 +1,8 @@
 // ─────────────────────────────────────────────────────────
 // これは「業務アプリの画面」です。宣伝ページ（LP）ではありません。
 //
-// /build を実行すると、docs/03_spec.md にそって
-// この構造を保ったまま、あなたの題材のツールに作り替えられます。
+// docs/03_spec.md の要件定義書にそって作られた、
+// 中小企業診断士の受講カリキュラム進捗管理ツールです。
 //
 // 画面の骨格（この形は崩さない）:
 //   左メニュー（.side）＋ 上部バー（.topbar）＋ 本体（.content）
@@ -13,59 +13,44 @@
 import { useEffect, useMemo, useState } from "react";
 
 // ═══════════════════════════════════════════════════════════
-//  画面の型 ── ここだけ選び直せば、見た目と並び方が変わります
-//  /build が docs/03_spec.md の「0. 画面の型」を見てここを設定します。
-//  ⚠ 新しいCSSは書かない。下の選択肢から選ぶこと。
+//  画面の型 ── docs/03_spec.md「0. 画面の型」のとおりに設定
 // ═══════════════════════════════════════════════════════════
 
-/** 色み。業種の空気に合わせる
- *  "pine"   教育・サービス・その他（初期値）
- *  "indigo" 士業・不動産・BtoB
- *  "clay"   建設・工務店・現場仕事
- *  "sea"    医療・介護・公共
- *  "wine"   飲食・小売・美容
- */
-const TONE = "pine";
+/** 色み。士業（中小企業診断士）向けなので落ち着いた紺 */
+const TONE = "indigo";
 
-/** 密度。1日に見る件数で決める
- *  "compact" 1日20件以上（多くの行を1画面に）
- *  "normal"  ふつう（初期値）
- *  "roomy"   1日5件以下で、1件が重い（ゆったり）
- */
-const DENSITY = "normal";
+/** 密度。年1カリキュラム・4〜5年で件数は少なく、1件が重いので roomy */
+const DENSITY = "roomy";
 
-/** 画面の型。3行目「何が一覧で見られると助かるか」で決める
- *  "queue" 待たせているものを、古い順に片づける（問い合わせ・依頼・返信）
- *  "stage" いくつかの段階を順に進んでいく（査定→撮影→値付け→出品）
- *  "due"   期限がある（締切・訪問予定・提出物・更新期限）
- */
-const LAYOUT: "queue" | "stage" | "due" = "queue";
+/** 画面の型。「どこまで進んだか」を軸にするので stage（段階ごとに束ねる） */
+const LAYOUT: "queue" | "stage" | "due" = "stage";
 
-/** 数え方。件 / 名 / 棟 / 台 / 点 / 本 など、その仕事の言葉で */
-const UNIT = "件";
+/** 数え方。カリキュラムは「1回・2回…」と数える */
+const UNIT = "回";
 
-/** 区分の選択肢。LAYOUT が "stage" のときは、これが「段階」になる（順番どおりに並ぶ） */
-const CATEGORIES = ["LINE", "電話", "メール", "紹介"];
+/** 区分の選択肢。stage なので、これが受講の段階になる（受講済みは別枠で管理） */
+const CATEGORIES = ["未受講", "受講予定"];
 
 // ═══════════════════════════════════════════════════════════
 
-/** 1件のデータ。/build でこの項目名を題材に合わせて変える */
+/** 1件のデータ＝カリキュラム1回分 */
 type Record = {
   id: string;
-  name: string;      // 主たる名前（顧客名・品名など）
-  category: string;  // 区分／段階／種別
-  note: string;      // メモ
-  date: string;      // YYYY-MM-DD（queue=受けた日 / stage=受け入れた日 / due=期限）
-  done: boolean;     // 片づいたか
+  name: string;      // カリキュラム名（テーマ）
+  term: string;      // 年度・回（例：2年目 第3回）
+  category: string;  // 受講状況（未受講／受講予定）。受講済みかどうかは done で管理
+  note: string;       // 理解度メモ
+  date: string;       // YYYY-MM-DD。受講日（未定なら空文字）
+  done: boolean;      // 受講済みか
 };
 
 type View = "list" | "new" | "settings";
 type Filter = "open" | "done" | "all";
 
-const KEY = "starter-records";
-const NAME_KEY = "starter-appname";
+const KEY = "curriculum-data";
+const NAME_KEY = "curriculum-appname";
 
-/** 画面の型ごとの言葉。ここを直せば画面じゅうの文言が揃って変わる */
+/** 画面の型ごとの言葉 */
 const TEXT = {
   queue: {
     sub: "未対応のものが、待たせている順に並びます",
@@ -76,12 +61,12 @@ const TEXT = {
     headOpen: "未対応（待たせている順）",
   },
   stage: {
-    sub: "どの段階で止まっているかが分かります",
-    open: "進行中", done: "完了",
-    toTo: "完了にする", toBack: "進行中に戻す",
-    dateLabel: "受け入れた日", catLabel: "いまの段階",
-    stat2: "7日以上 動きなし",
-    headOpen: "進行中",
+    sub: "残りのカリキュラムが、あとどれだけあるかが分かります",
+    open: "残り", done: "受講済み",
+    toTo: "受講済みにする", toBack: "未受講に戻す",
+    dateLabel: "受講日", catLabel: "受講状況",
+    stat2: "7日以上 未更新",
+    headOpen: "残り（未受講・受講予定）",
   },
   due: {
     sub: "期限が近い順に並びます",
@@ -93,7 +78,7 @@ const TEXT = {
   },
 }[LAYOUT];
 
-/** n日前の日付。マイナスを渡すとn日後（"due" の見本データで使う） */
+/** n日前の日付。マイナスを渡すとn日後 */
 const ago = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 const today = () => ago(0);
 
@@ -103,28 +88,28 @@ const diff = (d: string) =>
     (new Date(d + "T00:00:00").getTime() - new Date(today() + "T00:00:00").getTime()) / 86400000
   );
 
-/** 何日待たせているか（"queue" / "stage" 用） */
-const waiting = (d: string) => Math.max(0, -diff(d));
+/** 何日経ったか（日付が無いときは NaN → 対象外になる） */
+const waiting = (d: string) => (d ? Math.max(0, -diff(d)) : NaN);
 
 /**
- * 見本データ。/build でこの中身を題材に合わせて入れ替える。
- * ⚠ 実在の人名・会社名・連絡先は使わない。件数は12〜15件（少ないと画面が寂しく見える）
+ * 見本データ。中小企業診断士の受講カリキュラム（1年目〜5年目）を想定した架空のもの。
+ * ⚠ 実在の人名・会社名・連絡先は使わない
  */
 const SAMPLE: Record[] = [
-  { id: "s01", name: "佐藤さん（中2）", category: "LINE",   note: "数学と英語、週2希望。木曜以外",        date: ago(0),  done: false },
-  { id: "s02", name: "田村さん（小5）", category: "電話",   note: "折り返し希望 18時以降",               date: ago(1),  done: false },
-  { id: "s03", name: "鈴木さん（高1）", category: "紹介",   note: "在籍生のご家族から。物理を見てほしい",  date: ago(1),  done: false },
-  { id: "s04", name: "中村さん（中3）", category: "メール", note: "受験相談。志望校はまだ決めていない",   date: ago(2),  done: false },
-  { id: "s05", name: "渡辺さん（中2）", category: "紹介",   note: "平日夕方のみ。部活が19時まで",         date: ago(3),  done: false },
-  { id: "s06", name: "小林さん（中1）", category: "LINE",   note: "体験授業の日程を調整中",              date: ago(4),  done: false },
-  { id: "s07", name: "松本さん（小4）", category: "メール", note: "兄弟割引について聞かれている",         date: ago(5),  done: false },
-  { id: "s08", name: "山口さん（小6）", category: "電話",   note: "料金表を送ってほしいとのこと",         date: ago(6),  done: false },
-  { id: "s09", name: "吉田さん（高2）", category: "LINE",   note: "夏期講習の残席を確認したい",           date: ago(9),  done: false },
-  { id: "s10", name: "井上さん（中3）", category: "電話",   note: "面談日程を確定。来週火曜18時",         date: ago(12), done: true },
-  { id: "s11", name: "清水さん（高3）", category: "LINE",   note: "資料送付済み。返事待ち",              date: ago(14), done: true },
-  { id: "s12", name: "森さん（小3）",   category: "紹介",   note: "体験のあと入会。4月から週1",          date: ago(16), done: true },
-  { id: "s13", name: "大野さん（中1）", category: "メール", note: "他塾と比較検討中とのこと",            date: ago(18), done: true },
-  { id: "s14", name: "岡田さん（高1）", category: "LINE",   note: "今回は見送りとご連絡あり",            date: ago(21), done: true },
+  { id: "s01", name: "経営戦略とマーケティング",                 term: "1年目 第1回", category: "受講予定", note: "特に問題なく理解できた",           date: ago(180), done: true },
+  { id: "s02", name: "企業経営理論",                             term: "1年目 第2回", category: "受講予定", note: "戦略論の部分は復習が必要",         date: ago(150), done: true },
+  { id: "s03", name: "財務・会計",                               term: "1年目 第3回", category: "受講予定", note: "財務諸表分析は要復習",             date: ago(120), done: true },
+  { id: "s04", name: "運営管理（オペレーション）",               term: "1年目 第4回", category: "受講予定", note: "生産管理の指標は理解できた",       date: ago(95),  done: true },
+  { id: "s05", name: "経営法務",                                 term: "1年目 第5回", category: "受講予定", note: "特になし",                         date: ago(70),  done: true },
+  { id: "s06", name: "中小企業経営・政策",                       term: "2年目 第1回", category: "未受講",   note: "",                                  date: "",       done: false },
+  { id: "s07", name: "情報システムとITの活用",                   term: "2年目 第2回", category: "受講予定", note: "教材は届いている",                 date: ago(-14), done: false },
+  { id: "s08", name: "経営情報システム演習",                     term: "2年目 第3回", category: "未受講",   note: "",                                  date: "",       done: false },
+  { id: "s09", name: "企業診断実務Ⅰ",                           term: "2年目 第4回", category: "受講予定", note: "グループワークの準備が必要",       date: ago(-30), done: false },
+  { id: "s10", name: "地域活性化と中小企業支援",                 term: "3年目 第1回", category: "未受講",   note: "",                                  date: "",       done: false },
+  { id: "s11", name: "事業承継・M&A",                            term: "3年目 第2回", category: "未受講",   note: "",                                  date: "",       done: false },
+  { id: "s12", name: "デジタルトランスフォーメーション実践",     term: "4年目 第1回", category: "未受講",   note: "",                                  date: "",       done: false },
+  { id: "s13", name: "経営診断実務Ⅱ（総仕上げ）",               term: "4年目 第2回", category: "未受講",   note: "",                                  date: "",       done: false },
+  { id: "s14", name: "独立診断士のための実務補習まとめ",         term: "5年目 第1回", category: "未受講",   note: "",                                  date: "",       done: false },
 ];
 
 /** 一覧をどう束ねるか。LAYOUT ごとに変わる */
@@ -134,7 +119,7 @@ function grouped(list: Record[], filter: Filter): Group[] {
   const head = filter === "open" ? TEXT.headOpen : filter === "done" ? TEXT.done : "すべて";
 
   if (LAYOUT === "stage" && filter === "open") {
-    // 段階ごとに束ねる。CATEGORIES の順に並べ、中身が無い段階は出さない
+    // 段階（受講状況）ごとに束ねる。CATEGORIES の順に並べ、中身が無い段階は出さない
     return CATEGORIES.map((c) => ({
       key: c,
       label: c,
@@ -163,23 +148,17 @@ function grouped(list: Record[], filter: Filter): Group[] {
   return [{ key: "all", label: head, items: list }];
 }
 
-/** 行の右に出す小さなバッジ。LAYOUT ごとに意味が変わる */
+/** 行の右に出す小さなバッジ。日程が決まっていないもの／7日以上動きがないものに付く */
 function rowBadge(r: Record): { text: string; kind: "warn" | "danger" } | null {
   if (r.done) return null;
-  if (LAYOUT === "due") {
-    const d = diff(r.date);
-    if (d < 0) return { text: `${-d}日 超過`, kind: "danger" };
-    if (d === 0) return { text: "今日", kind: "warn" };
-    return null;
-  }
+  if (!r.date) return { text: "日程未定", kind: "warn" };
   const w = waiting(r.date);
-  const limit = LAYOUT === "stage" ? 7 : 3;
-  return w >= limit ? { text: `${w}日`, kind: "warn" } : null;
+  return w >= 7 ? { text: `${w}日 未更新`, kind: "warn" } : null;
 }
 
 export default function Home() {
   const [items, setItems] = useState<Record[]>([]);
-  const [appName, setAppName] = useState("お問い合わせ管理");
+  const [appName, setAppName] = useState("受講カリキュラム管理");
   const [loaded, setLoaded] = useState(false);
 
   const [view, setView] = useState<View>("list");
@@ -187,7 +166,7 @@ export default function Home() {
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<Record | null>(null);
 
-  const [form, setForm] = useState({ name: "", category: CATEGORIES[0], note: "", date: today() });
+  const [form, setForm] = useState({ name: "", term: "", category: CATEGORIES[0], note: "", date: "" });
 
   useEffect(() => {
     try {
@@ -219,36 +198,35 @@ export default function Home() {
     [items]
   );
 
-  /** 2つ目の統計。LAYOUT で意味が変わる */
+  /** 2つ目の統計：日程未定、または7日以上ステータスが動いていないもの */
   const attention = useMemo(() => {
     const open = items.filter((i) => !i.done);
-    if (LAYOUT === "due") return open.filter((i) => diff(i.date) < 0).length;
-    const limit = LAYOUT === "stage" ? 7 : 3;
-    return open.filter((i) => waiting(i.date) >= limit).length;
+    return open.filter((i) => !i.date || waiting(i.date) >= 7).length;
   }, [items]);
 
   const shown = useMemo(() => {
     const k = q.trim().toLowerCase();
     return items
       .filter((i) => (filter === "all" ? true : filter === "open" ? !i.done : i.done))
-      .filter((i) => !k || (i.name + i.note + i.category).toLowerCase().includes(k))
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .filter((i) => !k || (i.name + i.term + i.note + i.category).toLowerCase().includes(k))
+      .sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
   }, [items, filter, q]);
 
   const groups = useMemo(() => grouped(shown, filter), [shown, filter]);
 
   function resetForm() {
-    setForm({ name: "", category: CATEGORIES[0], note: "", date: today() });
+    setForm({ name: "", term: "", category: CATEGORIES[0], note: "", date: "" });
     setEditing(null);
   }
 
   function save() {
     const name = form.name.trim();
-    if (!name) return;
+    const term = form.term.trim();
+    if (!name || !term) return;
     if (editing) {
-      setItems(items.map((i) => (i.id === editing.id ? { ...i, ...form, name } : i)));
+      setItems(items.map((i) => (i.id === editing.id ? { ...i, ...form, name, term } : i)));
     } else {
-      setItems([...items, { id: String(Date.now()), ...form, name, done: false }]);
+      setItems([...items, { id: String(Date.now()), ...form, name, term, done: false }]);
     }
     resetForm();
     setView("list");
@@ -256,7 +234,7 @@ export default function Home() {
 
   function startEdit(r: Record) {
     setEditing(r);
-    setForm({ name: r.name, category: r.category, note: r.note, date: r.date });
+    setForm({ name: r.name, term: r.term, category: r.category, note: r.note, date: r.date });
     setView("new");
   }
 
@@ -297,7 +275,6 @@ export default function Home() {
             </button>
           ))}
         </div>
-        <div className="side-foot">/build で、あなたの題材に作り替わります</div>
       </nav>
 
       {/* ───────── 本体 ───────── */}
@@ -332,7 +309,7 @@ export default function Home() {
               <div className="filters">
                 <div className="search">
                   <input className="field" value={q} onChange={(e) => setQ(e.target.value)}
-                    placeholder="名前・メモで検索" />
+                    placeholder="カリキュラム名・メモで検索" />
                 </div>
                 <div className="seg">
                   {(["open", "done", "all"] as Filter[]).map((f) => (
@@ -373,14 +350,14 @@ export default function Home() {
                           <div className="row" key={r.id}>
                             <div className="row-main">
                               <div className="row-title">{r.name}</div>
-                              {r.note && <div className="row-sub">{r.note}</div>}
+                              <div className="row-sub">{r.term}{r.note ? ` ・ ${r.note}` : ""}</div>
                             </div>
                             <div className="row-meta">
                               {b && <span className={`badge badge-${b.kind}`}>{b.text}</span>}
                               {!(LAYOUT === "stage" && filter === "open") && (
                                 <span className="badge">{r.category}</span>
                               )}
-                              <span className="row-time">{r.date.slice(5).replace("-", "/")}</span>
+                              {r.date && <span className="row-time">{r.date.slice(5).replace("-", "/")}</span>}
                               <button className="btn-ghost" onClick={() => startEdit(r)}>編集</button>
                               <button className="btn-ghost" onClick={() => toggle(r.id)}>
                                 {r.done ? TEXT.toBack : TEXT.toTo}
@@ -402,12 +379,21 @@ export default function Home() {
           {view === "new" && (
             <div className="panel">
               <div className="form-row">
-                <label className="label" htmlFor="f-name">名前<span className="req">必須</span></label>
+                <label className="label" htmlFor="f-name">カリキュラム名<span className="req">必須</span></label>
                 <input id="f-name" className="field" value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   onKeyDown={(e) => { if (e.key === "Enter") save(); }}
-                  placeholder="例：Aさん（中2）" />
-                <span className="hint">あとで見て誰か分かる書き方にします</span>
+                  placeholder="例：経営戦略とマーケティング" />
+                <span className="hint">あとで見て、何の講座か分かる書き方にします</span>
+              </div>
+
+              <div className="form-row">
+                <label className="label" htmlFor="f-term">年度・回<span className="req">必須</span></label>
+                <input id="f-term" className="field" value={form.term}
+                  onChange={(e) => setForm({ ...form, term: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+                  placeholder="例：2年目 第3回" />
+                <span className="hint">4〜5年のうち、何年目・第何回かを書きます</span>
               </div>
 
               <div className="form-row">
@@ -423,19 +409,20 @@ export default function Home() {
                     <label className="label" htmlFor="f-date">{TEXT.dateLabel}</label>
                     <input id="f-date" className="field" type="date" value={form.date}
                       onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                    <span className="hint">未定のときは空のままでよい</span>
                   </div>
                 </div>
               </div>
 
               <div className="form-row">
-                <label className="label" htmlFor="f-note">メモ</label>
+                <label className="label" htmlFor="f-note">理解度メモ</label>
                 <textarea id="f-note" className="field" value={form.note}
                   onChange={(e) => setForm({ ...form, note: e.target.value })}
-                  placeholder="希望曜日・科目・折り返し時間など" />
+                  placeholder="受講後に、理解できた点・復習が必要な点など" />
               </div>
 
               <div className="form-actions">
-                <button className="btn" onClick={save} disabled={!form.name.trim()}>
+                <button className="btn" onClick={save} disabled={!form.name.trim() || !form.term.trim()}>
                   {editing ? "保存する" : "一覧に追加"}
                 </button>
                 <button className="btn-ghost" onClick={() => { resetForm(); setView("list"); }}>やめる</button>
