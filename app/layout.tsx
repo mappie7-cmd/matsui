@@ -3,8 +3,8 @@ import "./globals.css";
 
 // ▼ サイトのタイトル・説明。Claude Code に「タイトルを◯◯に変えて」と頼めば書き換わる。
 export const metadata: Metadata = {
-  title: "はじめてのツール",
-  description: "Claude Code で作った、自分の事業のツール",
+  title: "受講カリキュラム管理",
+  description: "中小企業診断士の受講カリキュラムの進捗を管理するツール",
 };
 
 export default function RootLayout({
