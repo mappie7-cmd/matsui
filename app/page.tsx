@@ -1,69 +1,53 @@
 // ─────────────────────────────────────────────────────────
 // これは「業務アプリの画面」です。宣伝ページ（LP）ではありません。
 //
-// /build を実行すると、docs/03_spec.md にそって
-// この構造を保ったまま、あなたの題材のツールに作り替えられます。
-//
-// 画面の骨格（この形は崩さない）:
-//   左メニュー（.side）＋ 上部バー（.topbar）＋ 本体（.content）
-//   一覧 / 新規登録 / 設定 の3画面を view で切り替える
+// 中小企業診断士の受講記録管理ツール。
+// 左メニュー（.side）＋ 上部バー（.topbar）＋ 本体（.content）
+// 一覧 / 新規登録 / 設定 の3画面を view で切り替える
 // ─────────────────────────────────────────────────────────
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 
 // ═══════════════════════════════════════════════════════════
-//  画面の型 ── ここだけ選び直せば、見た目と並び方が変わります
-//  /build が docs/03_spec.md の「0. 画面の型」を見てここを設定します。
-//  ⚠ 新しいCSSは書かない。下の選択肢から選ぶこと。
+//  画面の型 ── docs/03_spec.md の「0. 画面の型」に合わせて設定
 // ═══════════════════════════════════════════════════════════
 
-/** 色み。業種の空気に合わせる
- *  "pine"   教育・サービス・その他（初期値）
- *  "indigo" 士業・不動産・BtoB
- *  "clay"   建設・工務店・現場仕事
- *  "sea"    医療・介護・公共
- *  "wine"   飲食・小売・美容
- */
-const TONE = "pine";
+/** 色み。士業・BtoB */
+const TONE = "indigo";
 
-/** 密度。1日に見る件数で決める
- *  "compact" 1日20件以上（多くの行を1画面に）
- *  "normal"  ふつう（初期値）
- *  "roomy"   1日5件以下で、1件が重い（ゆったり）
- */
-const DENSITY = "normal";
+/** 密度。年1回・少数の科目で、1件が重い（多日程の研修） */
+const DENSITY = "roomy";
 
-/** 画面の型。3行目「何が一覧で見られると助かるか」で決める
- *  "queue" 待たせているものを、古い順に片づける（問い合わせ・依頼・返信）
- *  "stage" いくつかの段階を順に進んでいく（査定→撮影→値付け→出品）
- *  "due"   期限がある（締切・訪問予定・提出物・更新期限）
- */
-const LAYOUT: "queue" | "stage" | "due" = "queue";
+/** 画面の型。「どこまで進んだか」を段階で束ねる */
+const LAYOUT: "queue" | "stage" | "due" = "stage";
 
-/** 数え方。件 / 名 / 棟 / 台 / 点 / 本 など、その仕事の言葉で */
-const UNIT = "件";
+/** 数え方 */
+const UNIT = "科目";
 
-/** 区分の選択肢。LAYOUT が "stage" のときは、これが「段階」になる（順番どおりに並ぶ） */
-const CATEGORIES = ["LINE", "電話", "メール", "紹介"];
+/** 段階の選択肢（「受講済み」は done フラグで表す） */
+const CATEGORIES = ["未受講", "受講予定"];
 
 // ═══════════════════════════════════════════════════════════
 
-/** 1件のデータ。/build でこの項目名を題材に合わせて変える */
+/** 1件のデータ（1科目） */
 type Record = {
   id: string;
-  name: string;      // 主たる名前（顧客名・品名など）
-  category: string;  // 区分／段階／種別
-  note: string;      // メモ
-  date: string;      // YYYY-MM-DD（queue=受けた日 / stage=受け入れた日 / due=期限）
-  done: boolean;     // 片づいたか
+  name: string;           // 科目名
+  category: string;       // 段階（未受講 / 受講予定）
+  note: string;            // メモ
+  date: string;            // YYYY-MM-DD（受講予定日／受講日）
+  understanding: string;   // 理解度（未評価 / ◎ / ○ / △）
+  done: boolean;           // 受講済みか
 };
 
 type View = "list" | "new" | "settings";
 type Filter = "open" | "done" | "all";
 
-const KEY = "starter-records";
-const NAME_KEY = "starter-appname";
+const KEY = "shindanshi-curriculum";
+const NAME_KEY = "shindanshi-appname";
+
+const UNDERSTANDING_OPTIONS = ["未評価", "◎", "○", "△"];
 
 /** 画面の型ごとの言葉。ここを直せば画面じゅうの文言が揃って変わる */
 const TEXT = {
@@ -76,12 +60,12 @@ const TEXT = {
     headOpen: "未対応（待たせている順）",
   },
   stage: {
-    sub: "どの段階で止まっているかが分かります",
-    open: "進行中", done: "完了",
-    toTo: "完了にする", toBack: "進行中に戻す",
-    dateLabel: "受け入れた日", catLabel: "いまの段階",
-    stat2: "7日以上 動きなし",
-    headOpen: "進行中",
+    sub: "科目ごとの進み具合が、段階で分かります",
+    open: "受講前", done: "受講済み",
+    toTo: "受講済みにする", toBack: "受講前に戻す",
+    dateLabel: "受講（予定）日", catLabel: "進み具合",
+    stat2: "予定日を過ぎている",
+    headOpen: "受講前",
   },
   due: {
     sub: "期限が近い順に並びます",
@@ -93,7 +77,7 @@ const TEXT = {
   },
 }[LAYOUT];
 
-/** n日前の日付。マイナスを渡すとn日後（"due" の見本データで使う） */
+/** n日前の日付。マイナスを渡すとn日後 */
 const ago = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 const today = () => ago(0);
 
@@ -106,25 +90,28 @@ const diff = (d: string) =>
 /** 何日待たせているか（"queue" / "stage" 用） */
 const waiting = (d: string) => Math.max(0, -diff(d));
 
+/** 段階が7日/30日以上動いていないと見なす日数の境目 */
+const ATTENTION_LIMIT = LAYOUT === "stage" ? 30 : 3;
+
 /**
- * 見本データ。/build でこの中身を題材に合わせて入れ替える。
- * ⚠ 実在の人名・会社名・連絡先は使わない。件数は12〜15件（少ないと画面が寂しく見える）
+ * 見本データ。実在の人名・連絡先は使わない。
+ * 中小企業診断士の実務補習・研修カリキュラムを想定した架空の科目名。
  */
 const SAMPLE: Record[] = [
-  { id: "s01", name: "佐藤さん（中2）", category: "LINE",   note: "数学と英語、週2希望。木曜以外",        date: ago(0),  done: false },
-  { id: "s02", name: "田村さん（小5）", category: "電話",   note: "折り返し希望 18時以降",               date: ago(1),  done: false },
-  { id: "s03", name: "鈴木さん（高1）", category: "紹介",   note: "在籍生のご家族から。物理を見てほしい",  date: ago(1),  done: false },
-  { id: "s04", name: "中村さん（中3）", category: "メール", note: "受験相談。志望校はまだ決めていない",   date: ago(2),  done: false },
-  { id: "s05", name: "渡辺さん（中2）", category: "紹介",   note: "平日夕方のみ。部活が19時まで",         date: ago(3),  done: false },
-  { id: "s06", name: "小林さん（中1）", category: "LINE",   note: "体験授業の日程を調整中",              date: ago(4),  done: false },
-  { id: "s07", name: "松本さん（小4）", category: "メール", note: "兄弟割引について聞かれている",         date: ago(5),  done: false },
-  { id: "s08", name: "山口さん（小6）", category: "電話",   note: "料金表を送ってほしいとのこと",         date: ago(6),  done: false },
-  { id: "s09", name: "吉田さん（高2）", category: "LINE",   note: "夏期講習の残席を確認したい",           date: ago(9),  done: false },
-  { id: "s10", name: "井上さん（中3）", category: "電話",   note: "面談日程を確定。来週火曜18時",         date: ago(12), done: true },
-  { id: "s11", name: "清水さん（高3）", category: "LINE",   note: "資料送付済み。返事待ち",              date: ago(14), done: true },
-  { id: "s12", name: "森さん（小3）",   category: "紹介",   note: "体験のあと入会。4月から週1",          date: ago(16), done: true },
-  { id: "s13", name: "大野さん（中1）", category: "メール", note: "他塾と比較検討中とのこと",            date: ago(18), done: true },
-  { id: "s14", name: "岡田さん（高1）", category: "LINE",   note: "今回は見送りとご連絡あり",            date: ago(21), done: true },
+  { id: "s01", name: "経営戦略論",         category: "未受講", note: "SWOTとPPMの実務適用がよく理解できた", date: ago(400), understanding: "◎", done: true },
+  { id: "s02", name: "財務会計",           category: "未受講", note: "簿記の復習が必要",                     date: ago(380), understanding: "○", done: true },
+  { id: "s03", name: "マーケティング戦略", category: "未受講", note: "STP分析の事例を再確認したい",           date: ago(350), understanding: "◎", done: true },
+  { id: "s04", name: "経営情報システム",   category: "未受講", note: "ITベンダー選定の評価軸が曖昧なまま終わった", date: ago(30), understanding: "△", done: true },
+  { id: "s05", name: "中小企業政策",       category: "未受講", note: "補助金制度の一覧を作った",             date: ago(20), understanding: "○", done: true },
+  { id: "s06", name: "生産管理",           category: "受講予定", note: "工場見学の日程を確認する",           date: ago(-14), understanding: "未評価", done: false },
+  { id: "s07", name: "店舗診断実習",       category: "受講予定", note: "商店街の実習先が決まった",           date: ago(-30), understanding: "未評価", done: false },
+  { id: "s08", name: "組織・人事管理",     category: "受講予定", note: "人事評価制度の設計演習がある",       date: ago(-60), understanding: "未評価", done: false },
+  { id: "s09", name: "創業支援実務",       category: "受講予定", note: "予定日が過ぎている。日程を確認する", date: ago(45), understanding: "未評価", done: false },
+  { id: "s10", name: "生産性向上支援",     category: "未受講", note: "3年目カリキュラムの候補",             date: ago(-120), understanding: "未評価", done: false },
+  { id: "s11", name: "事業承継支援",       category: "未受講", note: "4年目に開講予定と聞いている",         date: ago(-200), understanding: "未評価", done: false },
+  { id: "s12", name: "IT利活用支援",       category: "未受講", note: "",                                     date: ago(-250), understanding: "未評価", done: false },
+  { id: "s13", name: "農業経営診断",       category: "未受講", note: "選択科目。履修するか検討中",           date: ago(-300), understanding: "未評価", done: false },
+  { id: "s14", name: "補助金活用支援",     category: "未受講", note: "申請書の演習があるらしい",             date: ago(-90), understanding: "未評価", done: false },
 ];
 
 /** 一覧をどう束ねるか。LAYOUT ごとに変わる */
@@ -173,13 +160,19 @@ function rowBadge(r: Record): { text: string; kind: "warn" | "danger" } | null {
     return null;
   }
   const w = waiting(r.date);
-  const limit = LAYOUT === "stage" ? 7 : 3;
-  return w >= limit ? { text: `${w}日`, kind: "warn" } : null;
+  return w >= ATTENTION_LIMIT ? { text: `${w}日 経過`, kind: "warn" } : null;
+}
+
+/** 理解度に応じたバッジの色 */
+function understandingClass(u: string): string {
+  if (u === "◎") return "badge-ok";
+  if (u === "△") return "badge-warn";
+  return "";
 }
 
 export default function Home() {
   const [items, setItems] = useState<Record[]>([]);
-  const [appName, setAppName] = useState("お問い合わせ管理");
+  const [appName, setAppName] = useState("受講記録");
   const [loaded, setLoaded] = useState(false);
 
   const [view, setView] = useState<View>("list");
@@ -187,7 +180,9 @@ export default function Home() {
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<Record | null>(null);
 
-  const [form, setForm] = useState({ name: "", category: CATEGORIES[0], note: "", date: today() });
+  const [form, setForm] = useState({
+    name: "", category: CATEGORIES[0], note: "", date: today(), understanding: UNDERSTANDING_OPTIONS[0],
+  });
 
   useEffect(() => {
     try {
@@ -219,12 +214,10 @@ export default function Home() {
     [items]
   );
 
-  /** 2つ目の統計。LAYOUT で意味が変わる */
+  /** 2つ目の統計。予定日を過ぎているのに、まだ受講済みにしていない科目の数 */
   const attention = useMemo(() => {
     const open = items.filter((i) => !i.done);
-    if (LAYOUT === "due") return open.filter((i) => diff(i.date) < 0).length;
-    const limit = LAYOUT === "stage" ? 7 : 3;
-    return open.filter((i) => waiting(i.date) >= limit).length;
+    return open.filter((i) => waiting(i.date) >= ATTENTION_LIMIT).length;
   }, [items]);
 
   const shown = useMemo(() => {
@@ -238,7 +231,7 @@ export default function Home() {
   const groups = useMemo(() => grouped(shown, filter), [shown, filter]);
 
   function resetForm() {
-    setForm({ name: "", category: CATEGORIES[0], note: "", date: today() });
+    setForm({ name: "", category: CATEGORIES[0], note: "", date: today(), understanding: UNDERSTANDING_OPTIONS[0] });
     setEditing(null);
   }
 
@@ -256,7 +249,7 @@ export default function Home() {
 
   function startEdit(r: Record) {
     setEditing(r);
-    setForm({ name: r.name, category: r.category, note: r.note, date: r.date });
+    setForm({ name: r.name, category: r.category, note: r.note, date: r.date, understanding: r.understanding });
     setView("new");
   }
 
@@ -297,7 +290,7 @@ export default function Home() {
             </button>
           ))}
         </div>
-        <div className="side-foot">/build で、あなたの題材に作り替わります</div>
+        <div className="side-foot">設定からいつでも初期化できます</div>
       </nav>
 
       {/* ───────── 本体 ───────── */}
@@ -332,7 +325,7 @@ export default function Home() {
               <div className="filters">
                 <div className="search">
                   <input className="field" value={q} onChange={(e) => setQ(e.target.value)}
-                    placeholder="名前・メモで検索" />
+                    placeholder="科目名・メモで検索" />
                 </div>
                 <div className="seg">
                   {(["open", "done", "all"] as Filter[]).map((f) => (
@@ -353,7 +346,7 @@ export default function Home() {
                       <span className="count">0 {UNIT}</span>
                     </div>
                     <div className="empty">
-                      <div className="t">{q ? "見つかりませんでした" : "ここに表示するものがありません"}</div>
+                      <div className="t">{q ? "見つかりませんでした" : "ここに表示する科目がありません"}</div>
                       <div className="d">
                         {q ? "検索の言葉を変えてみてください。" : "右上の「新規登録」から追加できます。"}
                       </div>
@@ -377,10 +370,16 @@ export default function Home() {
                             </div>
                             <div className="row-meta">
                               {b && <span className={`badge badge-${b.kind}`}>{b.text}</span>}
-                              {!(LAYOUT === "stage" && filter === "open") && (
-                                <span className="badge">{r.category}</span>
+                              {r.done ? (
+                                <span className={`badge ${understandingClass(r.understanding)}`}>
+                                  理解度 {r.understanding}
+                                </span>
+                              ) : (
+                                !(LAYOUT === "stage" && filter === "open") && (
+                                  <span className="badge">{r.category}</span>
+                                )
                               )}
-                              <span className="row-time">{r.date.slice(5).replace("-", "/")}</span>
+                              <span className="row-time">{r.date.slice(2).replace(/-/g, "/")}</span>
                               <button className="btn-ghost" onClick={() => startEdit(r)}>編集</button>
                               <button className="btn-ghost" onClick={() => toggle(r.id)}>
                                 {r.done ? TEXT.toBack : TEXT.toTo}
@@ -402,12 +401,12 @@ export default function Home() {
           {view === "new" && (
             <div className="panel">
               <div className="form-row">
-                <label className="label" htmlFor="f-name">名前<span className="req">必須</span></label>
+                <label className="label" htmlFor="f-name">科目名<span className="req">必須</span></label>
                 <input id="f-name" className="field" value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   onKeyDown={(e) => { if (e.key === "Enter") save(); }}
-                  placeholder="例：Aさん（中2）" />
-                <span className="hint">あとで見て誰か分かる書き方にします</span>
+                  placeholder="例：経営戦略論" />
+                <span className="hint">研修や実務補習のカリキュラム表に出てくる名前で</span>
               </div>
 
               <div className="form-row">
@@ -428,10 +427,18 @@ export default function Home() {
               </div>
 
               <div className="form-row">
+                <label className="label" htmlFor="f-understanding">理解度（受講後に記録）</label>
+                <select id="f-understanding" className="select" value={form.understanding}
+                  onChange={(e) => setForm({ ...form, understanding: e.target.value })}>
+                  {UNDERSTANDING_OPTIONS.map((u) => <option key={u}>{u}</option>)}
+                </select>
+              </div>
+
+              <div className="form-row">
                 <label className="label" htmlFor="f-note">メモ</label>
                 <textarea id="f-note" className="field" value={form.note}
                   onChange={(e) => setForm({ ...form, note: e.target.value })}
-                  placeholder="希望曜日・科目・折り返し時間など" />
+                  placeholder="復習ポイント・気づきなど" />
               </div>
 
               <div className="form-actions">
